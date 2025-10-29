@@ -1,55 +1,35 @@
-// server.js
 import express from "express";
-import puppeteer from "puppeteer";
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 
 const app = express();
-const PORT = process.env.PORT || 8090;
+const PORT = process.env.PORT || 10000;
 
 app.get("/rate", async (req, res) => {
   try {
-    console.log("🌐 Puppeteer 실행 중...");
+    const url = "https://finance.naver.com/marketindex/exchangeList.naver";
+    const response = await fetch(url);
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
+    let usd = null;
+    let hkd = null;
+
+    $("table tbody tr").each((_, el) => {
+      const currency = $(el).find("td.tit a").text().trim();
+      const value = parseFloat($(el).find("td.sale").text().trim().replace(/,/g, ""));
+      if (currency.includes("미국")) usd = value;
+      if (currency.includes("홍콩")) hkd = value;
     });
 
-    const page = await browser.newPage();
-    await page.goto("https://finance.naver.com/marketindex/exchangeList.naver", {
-      waitUntil: "networkidle2",
-      timeout: 30000,
-    });
+    if (!usd || !hkd) throw new Error("Parsing failed");
 
-    // 테이블 데이터 가져오기
-    const data = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll("table tbody tr"));
-      return rows.map((row) => {
-        const cols = row.querySelectorAll("td");
-        return {
-          country: cols[0]?.innerText.trim(),
-          basePrice: cols[1]?.innerText.trim(),
-          cashBuy: cols[2]?.innerText.trim(),
-          cashSell: cols[3]?.innerText.trim(),
-          transferSend: cols[4]?.innerText.trim(),
-          transferReceive: cols[5]?.innerText.trim(),
-          usdPer: cols[6]?.innerText.trim(),
-          date: new Date().toISOString(),
-        };
-      });
-    });
-
-    await browser.close();
-    res.json({ ok: true, data });
+    res.json({ ok: true, USD: usd, HKD: hkd });
   } catch (err) {
-    console.error("❌ Error:", err.message);
     res.json({ ok: false, error: err.message });
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Naver FX 서버 실행 중: http://0.0.0.0:${PORT}`);
+app.listen(PORT, () => {
+  console.log(`✅ Naver FX (lite) server running on port ${PORT}`);
 });
